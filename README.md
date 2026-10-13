@@ -1,17 +1,42 @@
-# xenon_itam
-# Xenon ITAM (자산 관리 솔루션)
+# Xenon ITAM (엔터프라이즈 IT 자산 관리 솔루션)
 
-기존 엑셀(Excel) 기반의 파편화된 인프라/정보보호 자산 데이터를 통합하고, 통제력과 가시성을 제공하기 위해 자체 개발된 웹 표준 자산 관리 플랫폼(In-house ITAM System)입니다.
+기존 엑셀(Excel) 기반의 파편화된 인프라/정보보호 자산 데이터를 웹 표준 플랫폼으로 통합하고, 완벽한 통제력과 가시성을 제공하기 위해 개발된 자체 ITAM(IT Asset Management) 플랫폼입니다.
 
-초기 대용량 엑셀 마이그레이션을 안정적으로 수용하고, 향후 자동 수집 에이전트, AD/LDAP 조직도 동기화, EntraID SSO 연동까지 가능하도록 설계된 확장형 아키텍처를 가집니다.
+초기 대용량 엑셀 마이그레이션을 안정적으로 수용하며, **표준 공통 코드 및 조직 마스터(회사/부서/사용자) 기반의 입력 통제**, **관리자가 웹 UI에서 자산별 커스텀 어트리뷰트(속성)를 자유롭게 추가/확장**할 수 있는 동적 스키마 아키텍처를 제공합니다. 향후 자동 수집 에이전트, AD/LDAP 조직도 동기화, EntraID SSO 연동을 고려한 확장 구조를 가집니다.
 
 ---
 
-## 1. 시스템 아키텍처 (System Architecture)
+## 1. 확정 기술 스택 명세 (Technology Stack)
 
-전체 시스템은 Next.js 기반의 프론트엔드와 FastAPI 기반의 백엔드가 분리된 MSA 지향 구조를 가집니다. 무거운 작업(대량 엑셀 파싱, 웹훅 발송 등)은 Redis 기반의 비동기 워커 큐로 오프로딩합니다.
+엔터프라이즈급 성능, 대용량 비동기 처리, 엑셀 수준의 부드러운 가상 스크롤 그리드 구현을 위해 확정된 레이어별 기술 스택입니다.
 
-### 1.1 컴포넌트 아키텍처
+| 레이어 (Layer) | 분류 (Category) | 기술 스택 / 라이브러리 | 버전 (Version) | 도입 목적 및 상세 역할 |
+| :--- | :--- | :--- | :--- | :--- |
+| **Frontend** | Framework | Next.js (App Router) | 15.x | SSR/SSG 하이브리드 지원, 직관적인 라우팅 및 엔터프라이즈 웹 앱 기반 구조 제공 |
+| | Language | TypeScript | 5.x | 컴파일 타임 엄격한 타입 검증으로 대규모 자산 데이터 모델의 런타임 에러 방지 |
+| | UI Library | shadcn/ui & Tailwind CSS | Latest / 3.4+ | 일관된 디자인 시스템 및 고도로 커스터마이징 가능한 컴포넌트 스타일링 |
+| | Data Grid | TanStack Table (v8) | 8.x | 헤드리스 기반의 복합 정렬, 다중 필터링, 컬럼 숨김/리사이징 상태 제어 |
+| | Virtualization | react-window | 1.8+ | DOM 노드 가상화(Virtual Scroll)로 수만 행의 자산 데이터 스크롤 시 브라우저 메모리 부하 방지 |
+| | State Mgt | Zustand | 4.x | 경량 전역 상태 관리 (사용자 세션, RBAC 권한, 커스텀 대시보드 위젯 배치 상태 저장) |
+| | Dashboard Chart | Recharts | 2.x | 부서별 자산 현황, OS별 EoS 도래 일정, 인프라 비용 통계 시각화 |
+| | HTTP Client | Axios | 1.x | API 통신 인터셉터(JWT 토큰 갱신, 에러 핸들링) 구현 |
+| **Backend** | Framework | FastAPI | 0.110+ | 고성능 Python 비동기(AsyncIO) 프레임워크, 자동 OpenAPI(Swagger) 문서화 |
+| | Language | Python | 3.11+ | 네이티브 비동기 처리 최적화 및 안정적인 패키지 생태계 |
+| | Validation | Pydantic v2 | 2.x | 러스트 기반 코어로 고속 데이터 파싱 및 가변 JSON 속성 스키마 유효성 검증 |
+| | Database ORM | SQLAlchemy 2.0 (Async) | 2.x | 완전한 비동기 DB 세션 지원, 하이브리드 EAV-JSONB 매핑 제어 |
+| | Migration | Alembic | 1.13+ | 선언적 DB 스키마 형상 관리 및 버전 관리 자동화 |
+| | Data Pipeline | Pandas / OpenPyXL | 2.x / 3.x | 기존 13개 시트 엑셀 파일의 스트리밍/청크 단위 고속 파싱 및 데이터 정제 |
+| **Database** | RDBMS & JSONB | PostgreSQL | 16-alpine | 공통 속성 RDB 관계 제어 + 가변 속성 JSONB 수용 및 GIN 인덱스를 통한 고속 검색 |
+| **Cache & Queue** | Cache / Event Bus | Redis | 7-alpine | 대시보드 집계 캐싱, 세션 저장소, 비동기 웹훅/엑셀 마이그레이션 이벤트 큐 |
+| **Infrastructure** | Containerization | Docker & Docker Compose | Latest | 개발 및 온프레미스 배포 환경의 멀티 컨테이너 통합 오케스트레이션 |
+
+---
+
+## 2. 시스템 아키텍처 및 이벤트 흐름 (System Architecture)
+
+전체 시스템은 Next.js 기반의 프론트엔드와 FastAPI 기반의 백엔드가 분리된 구조입니다. 대량 엑셀 파싱 및 Teams 웹훅 발송 등 부하가 큰 작업은 Redis 비동기 워커 큐로 오프로딩합니다.
+
+### 2.1 컴포넌트 아키텍처
 
 ```mermaid
 graph TD
@@ -23,6 +48,11 @@ graph TD
         FastAPI -->|Publish Event| Redis[(Redis 7 Pub/Sub & Queue)]
     end
 
+    subgraph Master Management
+        PG --- OrgMaster[(조직/사용자 마스터)]
+        PG --- CodeMaster[(공통코드/OS 카탈로그)]
+    end
+
     subgraph Async Workers
         Redis -->|Consume| WebhookWorker[Async Webhook Worker]
         Redis -->|Consume| ExcelWorker[Excel Import Worker]
@@ -31,9 +61,9 @@ graph TD
     end
 ```
 
-### 1.2 비동기 웹훅 처리 시퀀스 (Event Bus)
+### 2.2 비동기 웹훅 처리 시퀀스 (Event Bus)
 
-자산 변경 시 클라이언트 응답을 지연시키지 않도록, 이벤트 버스(Redis)를 거쳐 비동기로 알림을 처리합니다.
+자산 CRUD 발생 시 API 응답 지연을 방지하기 위해 이벤트를 Redis 큐에 넣고 백그라운드에서 비동기로 웹훅을 발송합니다.
 
 ```mermaid
 sequenceDiagram
@@ -48,7 +78,7 @@ sequenceDiagram
     API->>DB: Update Asset & Insert Audit Log
     DB-->>API: Transaction Commit OK
     API->>Redis: LPUSH "webhook:events" {asset_id, changes}
-    API-->>User: 200 OK (빠른 응답)
+    API-->>User: 200 OK (빠른 응답 반환)
     
     loop Polling
         Worker->>Redis: BRPOP "webhook:events"
@@ -57,43 +87,121 @@ sequenceDiagram
         alt Success
             Teams-->>Worker: 200 OK
         else Failed
-            Worker->>Redis: LPUSH "webhook:dlq" (Retry Queue)
+            Worker->>Redis: LPUSH "webhook:dlq" (Retry Queue 및 지수 백오프)
         end
     end
 ```
 
 ---
 
-## 2. 데이터베이스 스키마 설계 (Database DDL)
+## 3. 데이터베이스 스키마 상세 설계 (PostgreSQL 16 DDL)
 
-각 기술 자산(서버, DB, WAS 등)의 이질적인 가변 속성을 수용하기 위해 PostgreSQL의 `JSONB` 타입과 `GIN` 인덱스를 활용하는 하이브리드 모델링을 적용했습니다.
+데이터 오염 방지를 위한 **표준 조직/코드 마스터 테이블**, **자산 공통 테이블(`assets`)**, **동적 커스텀 속성 정의(`asset_attribute_definitions`)**, 그리고 **JSONB + GIN 인덱스(`asset_properties`)**의 유기적 결합 구조입니다.
 
-### 2.1 코어 자산 테이블 및 JSONB (DDL)
+### 3.1 조직 및 공통 코드 마스터 스키마 (데이터 정합성 보장)
 
 ```sql
--- 1. 마스터 자산 테이블 (공통 속성)
+-- 1. 회사/법인 마스터
+CREATE TABLE companies (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(50) UNIQUE NOT NULL,       -- 예: DONG_A_ST, DA_INFO
+    name VARCHAR(100) NOT NULL,              -- 예: 동아에스티, 디에이인포메이션
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- 2. 부서 계층 마스터 (향후 AD/LDAP 트리 구조 동기화 대비)
+CREATE TABLE departments (
+    id SERIAL PRIMARY KEY,
+    company_id INT REFERENCES companies(id) ON DELETE RESTRICT,
+    parent_id INT REFERENCES departments(id), -- 상위 부서 ID (재귀 구조)
+    code VARCHAR(50) NOT NULL,
+    name VARCHAR(100) NOT NULL,              -- 예: 아키텍처 인프라팀
+    is_active BOOLEAN DEFAULT TRUE,
+    UNIQUE(company_id, code)
+);
+
+-- 3. 시스템 사용자 및 담당자 마스터
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(50) UNIQUE NOT NULL,   -- 사번 또는 AD 로그인 계정
+    email VARCHAR(100) UNIQUE NOT NULL,
+    full_name VARCHAR(50) NOT NULL,         -- 이름
+    company_id INT REFERENCES companies(id),
+    department_id INT REFERENCES departments(id),
+    title VARCHAR(50),                      -- 직급/직책 (예: 책임)
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. 공통 코드 마스터 (상태, IDC 위치, 자산 분류 등 관리)
+CREATE TABLE common_codes (
+    id SERIAL PRIMARY KEY,
+    category VARCHAR(50) NOT NULL,          -- ASSET_STATUS, VENDOR, LOCATION 등
+    code VARCHAR(50) NOT NULL,              -- PROD, DEV, IDC_GCH, DELL 등
+    name VARCHAR(100) NOT NULL,             -- 운영, 개발, 고척 IDC, Dell Technologies
+    sort_order INT DEFAULT 0,
+    is_active BOOLEAN DEFAULT TRUE,
+    UNIQUE(category, code)
+);
+
+-- 5. 표준 소프트웨어/OS 카탈로그 (EoS 통계 연동용)
+CREATE TABLE software_catalog (
+    id SERIAL PRIMARY KEY,
+    category VARCHAR(30) NOT NULL,          -- OS, DBMS, WAS, WEB
+    vendor VARCHAR(50) NOT NULL,            -- RedHat, Microsoft, Oracle 등
+    name VARCHAR(100) NOT NULL,             -- RHEL, Windows Server, Oracle DB
+    version VARCHAR(50) NOT NULL,          -- 8.4, 2022, 19c
+    eos_date DATE,                          -- EoS 도래일 (통계 및 경고 배지 자동 연동)
+    is_active BOOLEAN DEFAULT TRUE,
+    UNIQUE(category, name, version)
+);
+```
+
+### 3.2 코어 자산, 가변 속성(JSONB) 및 동적 어트리뷰트 스키마
+
+```sql
+-- 6. 마스터 자산 테이블 (모든 자산 공통 식별 정보 + 마스터 데이터 FK 연계)
 CREATE TABLE assets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    asset_code VARCHAR(50) UNIQUE NOT NULL, -- 예: SVR-2610-001
-    asset_type VARCHAR(30) NOT NULL,        -- SERVER, STORAGE, CLOUD, DB 등
-    name VARCHAR(255) NOT NULL,             -- 호스트명 또는 서비스명
-    status VARCHAR(20) DEFAULT 'ACTIVE',    -- 운영, 폐기, 테스트 등
-    owner_id UUID REFERENCES users(id),     -- 담당자 FK
-    department VARCHAR(100),
+    asset_code VARCHAR(50) UNIQUE NOT NULL,      -- 자산관리코드 (예: SVR-2610-001)
+    asset_type VARCHAR(30) NOT NULL,             -- SERVER, STORAGE, CLOUD, DB 등
+    name VARCHAR(255) NOT NULL,                  -- 호스트명 또는 서비스명
+    status_code VARCHAR(50) NOT NULL,            -- common_codes 참조 (PROD, DEV 등)
+    service_company_id INT REFERENCES companies(id),    -- 서비스 대상 회사
+    owner_user_id UUID REFERENCES users(id),            -- 자산 소유자/정담당자
+    sub_owner_user_id UUID REFERENCES users(id),        -- 부담당자
+    managed_dept_id INT REFERENCES departments(id),     -- 관리 부서
+    standard_os_id INT REFERENCES software_catalog(id), -- 표준 OS (해당 시 선택)
+    primary_ip VARCHAR(45),                             -- 대표 IP 주소
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-CREATE INDEX idx_assets_type_status ON assets(asset_type, status);
+CREATE INDEX idx_assets_type_status ON assets(asset_type, status_code);
+CREATE INDEX idx_assets_owner ON assets(owner_user_id);
 
--- 2. 자산 가변 속성 테이블 (JSONB 활용)
+-- 7. 동적 커스텀 어트리뷰트 메타데이터 (사용자가 웹에서 추가한 필드)
+CREATE TABLE asset_attribute_definitions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    asset_type VARCHAR(30) NOT NULL,        -- 해당 속성이 적용될 자산 분류 (SERVER 등)
+    field_key VARCHAR(50) NOT NULL,         -- JSON 내부 Key (예: backup_policy, gpu_model)
+    field_label VARCHAR(100) NOT NULL,       -- UI 표시명 (예: 백업 정책, GPU 모델)
+    data_type VARCHAR(20) NOT NULL,         -- string, number, boolean, date, select, common_code
+    ref_category VARCHAR(50),               -- data_type이 common_code일 때 참조할 카테고리
+    options JSONB DEFAULT '[]'::jsonb,      -- custom select 타입일 경우 옵션 배열
+    is_required BOOLEAN DEFAULT FALSE,      -- 필수 입력 여부
+    is_searchable BOOLEAN DEFAULT TRUE,     -- 대시보드/그리드 필터 대상 여부
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(asset_type, field_key)
+);
+
+-- 8. 자산 가변 속성 테이블 (JSONB 및 GIN 인덱스)
 CREATE TABLE asset_properties (
     asset_id UUID PRIMARY KEY REFERENCES assets(id) ON DELETE CASCADE,
     properties JSONB NOT NULL DEFAULT '{}'::jsonb
 );
--- JSONB 내부 Key-Value 검색을 위한 GIN 인덱스 적용
 CREATE INDEX idx_asset_properties_gin ON asset_properties USING GIN (properties);
 
--- 3. 자산 변경 이력 (Audit Logs)
+-- 9. 자산 변경 이력 (Audit Logs)
 CREATE TABLE audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     asset_id UUID REFERENCES assets(id),
@@ -105,7 +213,7 @@ CREATE TABLE audit_logs (
 );
 ```
 
-### 2.2 위젯/행 단위 권한 제어 (RBAC)
+### 3.3 세밀한 위젯/행/열 단위 권한 제어 (RBAC)
 
 ```sql
 CREATE TABLE roles (
@@ -116,7 +224,7 @@ CREATE TABLE roles (
 
 CREATE TABLE permissions (
     id SERIAL PRIMARY KEY,
-    resource VARCHAR(50) NOT NULL,          -- ASSET_SERVER, DASHBOARD_COST, IDC_LOG
+    resource VARCHAR(50) NOT NULL,          -- ASSET_SERVER, DASHBOARD_COST, IDC_LOG, CODE_MANAGE
     action VARCHAR(20) NOT NULL,            -- READ, WRITE, EXPORT, MASKED_READ
     UNIQUE(resource, action)
 );
@@ -136,30 +244,66 @@ CREATE TABLE user_roles (
 
 ---
 
-## 3. 핵심 API 명세 (API Specifications)
+## 4. 핵심 API 명세 (API Specifications)
 
-### 3.1 동적 JSONB 필터링 자산 조회
+### 4.1 마스터 데이터 조회 API (SelectBox 드롭다운 바인딩용)
+프론트엔드 입력 폼 생성 시 호출하여 선택지를 제공합니다.
 
-`GET /api/v1/assets?type=SERVER&properties={"os_type":"RHEL","db_eos_status":"WARNING"}`
+*   `GET /api/v1/masters/companies`: 법인/회사 목록 조회
+*   `GET /api/v1/masters/departments?company_id={id}`: 특정 회사의 부서 트리 목록
+*   `GET /api/v1/masters/users?department_id={id}`: 부서별 담당자(사용자) 목록
+*   `GET /api/v1/masters/codes?category={cat}`: 공통 코드 목록 (상태, 제조사 등)
+*   `GET /api/v1/masters/software-catalog?category=OS`: 표준 OS 카탈로그 (EoS 일자 포함)
 
+### 4.2 동적 어트리뷰트 관리 API (사용자 정의 속성 추가)
+관리자가 웹 UI에서 자산별 입력 필드를 동적으로 추가할 때 호출합니다.
+
+*   **Endpoint:** `POST /api/v1/attributes/definitions`
+*   **Request Body:**
 ```json
 {
-  "total": 1250,
+  "asset_type": "SERVER",
+  "field_key": "gpu_spec",
+  "field_label": "GPU 규격",
+  "data_type": "select",
+  "options": ["NVIDIA A100", "NVIDIA H100", "None"],
+  "is_required": false,
+  "is_searchable": true
+}
+```
+
+### 4.3 통합 자산 조회 및 동적 필터링 API
+마스터 데이터(FK)와 JSONB 가변 필드를 조인 및 인덱싱 검색합니다.
+
+*   **Endpoint:** `GET /api/v1/assets?type=SERVER&company_id=1&os_catalog_id=12&properties={"gpu_spec":"NVIDIA H100"}`
+*   **Response Payload:**
+```json
+{
+  "total": 128,
   "page": 1,
   "data": [
     {
       "id": "a1b2c3d4-...",
       "asset_code": "SVR-2026-089",
       "asset_type": "SERVER",
-      "name": "WAS-PRD-01",
-      "status": "운영",
-      "owner": { "name": "맹호빈", "department": "아키텍처 인프라팀" },
+      "name": "AI-TRAIN-01",
+      "status": { "code": "PROD", "name": "운영" },
+      "service_company": { "id": 1, "name": "동아에스티" },
+      "managed_department": { "id": 10, "name": "아키텍처 인프라팀" },
+      "owner": { "id": "u-1234", "name": "맹호빈", "title": "책임" },
+      "standard_os": {
+        "id": 12,
+        "name": "RHEL",
+        "version": "8.4",
+        "eos_date": "2029-05-31",
+        "eos_status": "NORMAL"
+      },
+      "primary_ip": "10.10.5.21",
       "properties": {
         "manufacturer": "HPE",
-        "os_type": "RHEL 8.4",
-        "cpu_cores": 32,
-        "memory_gb": 128,
-        "ip_address": "10.10.5.21"
+        "cpu_cores": 64,
+        "memory_gb": 512,
+        "gpu_spec": "NVIDIA H100"
       },
       "updated_at": "2026-10-13T10:30:00Z"
     }
@@ -167,25 +311,57 @@ CREATE TABLE user_roles (
 }
 ```
 
-### 3.2 비동기 엑셀 임포트 (마이그레이션)
-
-`POST /api/v1/assets/import`
-- **Request:** `multipart/form-data` (file: `자산관리엑셀.xlsx`)
-- **Response:**
+### 4.4 대용량 엑셀 임포트 비동기 파이프라인
+*   **Endpoint:** `POST /api/v1/assets/import`
+*   **Request:** `multipart/form-data` (file: `자산관리엑셀.xlsx`, mode: `upsert`)
+*   **Response:**
 ```json
 {
   "task_id": "task-uuid-8899",
   "status": "PROCESSING",
-  "message": "엑셀 파일이 큐에 등록되었습니다. 진행 상황은 /api/v1/tasks/{task_id} 에서 확인하세요."
+  "message": "엑셀 파일이 큐에 등록되었습니다. 진행 상태는 /api/v1/tasks/{task_id} 에서 확인하세요."
 }
 ```
 
 ---
 
-## 4. 백엔드 코어 비즈니스 로직 (FastAPI)
+## 5. 백엔드 코어 비즈니스 로직 (FastAPI)
 
-### 4.1 RBAC 검증 (Dependency Injection)
+### 5.1 마스터 데이터 검증 및 동적 속성 검증 엔진
+```python
+# app/services/asset_service.py
+from fastapi import HTTPException
+from sqlalchemy import select
+from app.models import Asset, AttributeDefinition, Company, User, SoftwareCatalog
 
+async def validate_and_create_asset(db_session, payload: AssetCreateSchema):
+    # 1. 마스터 데이터 무결성 검증 (정형 필드)
+    company = await db_session.get(Company, payload.service_company_id)
+    if not company or not company.is_active:
+        raise HTTPException(status_code=400, detail="유효하지 않은 서비스 회사입니다.")
+        
+    owner = await db_session.get(User, payload.owner_user_id)
+    if not owner or not owner.is_active:
+        raise HTTPException(status_code=400, detail="유효하지 않은 담당자(사용자)입니다.")
+
+    if payload.standard_os_id:
+        os_info = await db_session.get(SoftwareCatalog, payload.standard_os_id)
+        if not os_info:
+            raise HTTPException(status_code=400, detail="유효하지 않은 표준 OS 카탈로그입니다.")
+
+    # 2. 동적 어트리뷰트(JSONB) 검증
+    definitions = await get_attribute_definitions(db_session, payload.asset_type)
+    for defn in definitions:
+        val = payload.properties.get(defn.field_key)
+        if defn.is_required and val is None:
+            raise HTTPException(status_code=400, detail=f"'{defn.field_label}' 속성은 필수 입력 항목입니다.")
+        if val is not None and defn.data_type == "select" and val not in defn.options:
+            raise HTTPException(status_code=400, detail=f"'{defn.field_label}'에 허용되지 않은 값: {val}")
+
+    # 3. 자산 생성 및 Audit Log 처리 로직 진행
+```
+
+### 5.2 RBAC 검증 (Dependency Injection)
 ```python
 # app/core/security.py
 from fastapi import Depends, HTTPException, status
@@ -202,8 +378,7 @@ def require_permission(resource: str, action: str):
     return permission_checker
 ```
 
-### 4.2 Redis 기반 웹훅 비동기 워커
-
+### 5.3 Redis 기반 비동기 웹훅 워커
 ```python
 # app/workers/webhook_worker.py
 import asyncio, json, httpx
@@ -222,41 +397,48 @@ async def process_webhook_queue(redis_client: Redis):
                     response = await client.post(TEAMS_WEBHOOK_URL, json=teams_payload, timeout=10.0)
                     response.raise_for_status()
         except httpx.HTTPError as e:
-            await redis_client.lpush("webhook:dlq", payload_str) # DLQ 처리
-        except Exception as e:
+            await redis_client.lpush("webhook:dlq", payload_str) # 실패 시 Dead Letter Queue 이동
+        except Exception:
             await asyncio.sleep(1)
 ```
 
 ---
 
-## 5. 프론트엔드 아키텍처 (Next.js 15)
+## 6. 프론트엔드 아키텍처 (Next.js 15)
 
-수천 건의 자산을 렌더링하기 위해 DOM 노드를 최소화하는 **Virtual Scroll (react-window)** 기술과 **TanStack Table v8**을 조합하여 구성합니다.
+데이터 정합성을 위해 텍스트 입력창을 최소화하고, 마스터 데이터를 연계한 캐스케이딩 드롭다운(Cascading Select: 회사 선택 -> 소속 부서 필터링 -> 담당자 선택)을 적용합니다.
 
-### 5.1 폴더 구조 (App Router)
+### 6.1 폴더 구조 (App Router)
 
 ```text
 /src
  ├── app/
  │   ├── (auth)/login/page.tsx
  │   ├── (dashboard)/
- │   │   ├── layout.tsx             # 전역 GNB/LNB 및 Auth Provider
- │   │   ├── page.tsx               # 커스텀 위젯 대시보드 (react-grid-layout)
- │   │   └── assets/[type]/page.tsx # 자산 타입별 동적 데이터 그리드
+ │   │   ├── layout.tsx                # 전역 GNB/LNB 및 Auth Provider
+ │   │   ├── page.tsx                  # 커스텀 위젯 대시보드 (react-grid-layout)
+ │   │   ├── assets/[type]/page.tsx    # 자산 타입별 동적 데이터 그리드
+ │   │   └── settings/
+ │   │       ├── attributes/page.tsx   # 사용자 정의 어트리뷰트 관리
+ │   │       ├── masters/page.tsx      # 공통 코드 및 OS 카탈로그 관리
+ │   │       └── org/page.tsx          # 회사/부서/조직도 관리 UI
  ├── components/
- │   ├── ui/                        # shadcn/ui 기반 공통 컴포넌트
- │   ├── data-table/                # TanStack Table + react-window 통합 뷰
- │   └── widgets/                   # 대시보드 통계용 Recharts 위젯
+ │   ├── ui/                           # shadcn/ui 기반 공통 컴포넌트
+ │   ├── data-table/                   # TanStack Table + react-window 통합 가상 스크롤 그리드
+ │   ├── dynamic-form/
+ │   │   ├── DynamicFormRenderer.tsx   # JSONB 커스텀 필드 자동 렌더러
+ │   │   └── OrgSelector.tsx           # 회사-부서-담당자 계층형 선택 컴포넌트
+ │   └── widgets/                      # 대시보드 통계용 Recharts 위젯 (EoS 현황 등)
  ├── lib/
- │   ├── api.ts                     # Axios 인스턴
- │   └── store.ts                   # Zustand (RBAC 상태 관리)
+ │   ├── api.ts                        # Axios 인스턴스 (인터셉터 포함)
+ │   └── store.ts                      # Zustand (RBAC 상태, 위젯 레이아웃 상태)
  └── types/
-     └── asset.d.ts                 # JSONB 속성 TypeScript 인터페이스
+     └── asset.d.ts                    # 공통 및 동적 어트리뷰트 TypeScript 인터페이스
 ```
 
 ---
 
-## 6. 인프라 배포 (Docker Integration)
+## 7. 인프라 배포 (Docker Integration)
 
 개발 및 온프레미스 배포를 위한 Multi-Container 환경 설정입니다.
 
