@@ -8,8 +8,6 @@
 
 ## 1. 확정 기술 스택 명세 (Technology Stack)
 
-엔터프라이즈급 성능, 대용량 비동기 처리, 엑셀 수준의 부드러운 가상 스크롤 그리드 구현을 위해 확정된 레이어별 기술 스택입니다.
-
 | 레이어 (Layer) | 분류 (Category) | 기술 스택 / 라이브러리 | 버전 (Version) | 도입 목적 및 상세 역할 |
 | :--- | :--- | :--- | :--- | :--- |
 | **Frontend** | Framework | Next.js (App Router) | 15.x | SSR/SSG 하이브리드 지원, 직관적인 라우팅 및 엔터프라이즈 웹 앱 기반 구조 제공 |
@@ -25,16 +23,17 @@
 | | Validation | Pydantic v2 | 2.x | 러스트 기반 코어로 고속 데이터 파싱 및 가변 JSON 속성 스키마 유효성 검증 |
 | | Database ORM | SQLAlchemy 2.0 (Async) | 2.x | 완전한 비동기 DB 세션 지원, 하이브리드 EAV-JSONB 매핑 제어 |
 | | Migration | Alembic | 1.13+ | 선언적 DB 스키마 형상 관리 및 버전 관리 자동화 |
+| | Async Worker | Celery | 5.3+ | Teams 웹훅 알림 비동기 큐잉 및 대용량 배치/스케줄러 작업 처리 |
 | | Data Pipeline | Pandas / OpenPyXL | 2.x / 3.x | 기존 13개 시트 엑셀 파일의 스트리밍/청크 단위 고속 파싱 및 데이터 정제 |
 | **Database** | RDBMS & JSONB | PostgreSQL | 16-alpine | 공통 속성 RDB 관계 제어 + 가변 속성 JSONB 수용 및 GIN 인덱스를 통한 고속 검색 |
-| **Cache & Queue** | Cache / Event Bus | Redis | 7-alpine | 대시보드 집계 캐싱, 세션 저장소, 비동기 웹훅/엑셀 마이그레이션 이벤트 큐 |
+| **Cache & Queue** | Cache / Event Bus | Redis | 7-alpine | 대시보드 집계 캐싱, 세션 저장소, Celery 메시지 브로커 |
 | **Infrastructure** | Containerization | Docker & Docker Compose | Latest | 개발 및 온프레미스 배포 환경의 멀티 컨테이너 통합 오케스트레이션 |
 
 ---
 
 ## 2. 시스템 아키텍처 및 이벤트 흐름 (System Architecture)
 
-전체 시스템은 Next.js 기반의 프론트엔드와 FastAPI 기반의 백엔드가 분리된 구조입니다. 대량 엑셀 파싱 및 Teams 웹훅 발송 등 부하가 큰 작업은 Redis 비동기 워커 큐로 오프로딩합니다.
+전체 시스템은 Next.js 기반의 프론트엔드와 FastAPI 기반의 백엔드가 분리된 구조입니다. 대량 엑셀 파싱 및 Teams 웹훅 발송 등 부하가 큰 작업은 Redis 기반의 Celery 워커 큐로 오프로딩합니다.
 
 ### 2.1 컴포넌트 아키텍처
 
@@ -45,7 +44,7 @@ graph TD
     
     subgraph Backend Core
         FastAPI -->|Read/Write| PG[(PostgreSQL 16)]
-        FastAPI -->|Publish Event| Redis[(Redis 7 Pub/Sub & Queue)]
+        FastAPI -->|Publish Task| Redis[(Redis 7 Broker & Cache)]
     end
 
     subgraph Master Management
@@ -54,16 +53,14 @@ graph TD
     end
 
     subgraph Async Workers
-        Redis -->|Consume| WebhookWorker[Async Webhook Worker]
-        Redis -->|Consume| ExcelWorker[Excel Import Worker]
-        WebhookWorker -->|HTTPS POST| Teams[MS Teams]
-        ExcelWorker -->|Batch Insert| PG
+        Redis -->|Consume| CeleryWorker[Celery Worker - Webhook/Import]
+        Redis -->|Schedule| CeleryBeat[Celery Beat - Periodic Task]
+        CeleryWorker -->|HTTPS POST| Teams[MS Teams]
+        CeleryWorker -->|Batch Insert| PG
     end
 ```
 
 ### 2.2 비동기 웹훅 처리 시퀀스 (Event Bus)
-
-자산 CRUD 발생 시 API 응답 지연을 방지하기 위해 이벤트를 Redis 큐에 넣고 백그라운드에서 비동기로 웹훅을 발송합니다.
 
 ```mermaid
 sequenceDiagram
@@ -71,24 +68,21 @@ sequenceDiagram
     participant API as FastAPI
     participant DB as PostgreSQL
     participant Redis as Redis Queue
-    participant Worker as Background Worker
+    participant Worker as Celery Worker
     participant Teams as MS Teams
 
     User->>API: PUT /api/v1/assets/SVR-001 (자산 수정)
     API->>DB: Update Asset & Insert Audit Log
     DB-->>API: Transaction Commit OK
-    API->>Redis: LPUSH "webhook:events" {asset_id, changes}
-    API-->>User: 200 OK (빠른 응답 반환)
+    API->>Redis: send_teams_webhook.delay(asset_id, changes)
+    API-->>User: 200 OK (즉각 응답 반환)
     
-    loop Polling
-        Worker->>Redis: BRPOP "webhook:events"
-        Redis-->>Worker: Event Payload
-        Worker->>Teams: HTTP POST (Adaptive Card)
-        alt Success
-            Teams-->>Worker: 200 OK
-        else Failed
-            Worker->>Redis: LPUSH "webhook:dlq" (Retry Queue 및 지수 백오프)
-        end
+    Worker->>Redis: Task 소비
+    Worker->>Teams: HTTP POST (Adaptive Card)
+    alt Success
+        Teams-->>Worker: 200 OK
+    else Failed
+        Worker->>Redis: Celery 재시도 정책에 따른 지수 백오프 Retry
     end
 ```
 
@@ -96,7 +90,7 @@ sequenceDiagram
 
 ## 3. 데이터베이스 스키마 상세 설계 (PostgreSQL 16 DDL)
 
-데이터 오염 방지를 위한 **표준 조직/코드 마스터 테이블**, **자산 공통 테이블(`assets`)**, **동적 커스텀 속성 정의(`asset_attribute_definitions`)**, 그리고 **JSONB + GIN 인덱스(`asset_properties`)**의 유기적 결합 구조입니다.
+데이터 오염 방지를 위한 **표준 조직/코드 마스터 테이블**, **자산 공통 테이블(`assets`)**, **동적 커스텀 속성 정의(`asset_attribute_definitions`)**, 그리고 **JSONB + GIN 인덱스(`asset_properties`)**의 결합 구조입니다.
 
 ### 3.1 조직 및 공통 코드 마스터 스키마 (데이터 정합성 보장)
 
@@ -247,17 +241,13 @@ CREATE TABLE user_roles (
 ## 4. 핵심 API 명세 (API Specifications)
 
 ### 4.1 마스터 데이터 조회 API (SelectBox 드롭다운 바인딩용)
-프론트엔드 입력 폼 생성 시 호출하여 선택지를 제공합니다.
-
 *   `GET /api/v1/masters/companies`: 법인/회사 목록 조회
 *   `GET /api/v1/masters/departments?company_id={id}`: 특정 회사의 부서 트리 목록
 *   `GET /api/v1/masters/users?department_id={id}`: 부서별 담당자(사용자) 목록
 *   `GET /api/v1/masters/codes?category={cat}`: 공통 코드 목록 (상태, 제조사 등)
 *   `GET /api/v1/masters/software-catalog?category=OS`: 표준 OS 카탈로그 (EoS 일자 포함)
 
-### 4.2 동적 어트리뷰트 관리 API (사용자 정의 속성 추가)
-관리자가 웹 UI에서 자산별 입력 필드를 동적으로 추가할 때 호출합니다.
-
+### 4.2 동적 어트리뷰트 관리 API
 *   **Endpoint:** `POST /api/v1/attributes/definitions`
 *   **Request Body:**
 ```json
@@ -273,8 +263,6 @@ CREATE TABLE user_roles (
 ```
 
 ### 4.3 통합 자산 조회 및 동적 필터링 API
-마스터 데이터(FK)와 JSONB 가변 필드를 조인 및 인덱싱 검색합니다.
-
 *   **Endpoint:** `GET /api/v1/assets?type=SERVER&company_id=1&os_catalog_id=12&properties={"gpu_spec":"NVIDIA H100"}`
 *   **Response Payload:**
 ```json
@@ -325,13 +313,12 @@ CREATE TABLE user_roles (
 
 ---
 
-## 5. 백엔드 코어 비즈니스 로직 (FastAPI)
+## 5. 백엔드 코어 비즈니스 로직 (FastAPI & Celery)
 
 ### 5.1 마스터 데이터 검증 및 동적 속성 검증 엔진
 ```python
 # app/services/asset_service.py
 from fastapi import HTTPException
-from sqlalchemy import select
 from app.models import Asset, AttributeDefinition, Company, User, SoftwareCatalog
 
 async def validate_and_create_asset(db_session, payload: AssetCreateSchema):
@@ -358,7 +345,7 @@ async def validate_and_create_asset(db_session, payload: AssetCreateSchema):
         if val is not None and defn.data_type == "select" and val not in defn.options:
             raise HTTPException(status_code=400, detail=f"'{defn.field_label}'에 허용되지 않은 값: {val}")
 
-    # 3. 자산 생성 및 Audit Log 처리 로직 진행
+    # 3. 자산 생성 처리 및 Celery 웹훅 트리거
 ```
 
 ### 5.2 RBAC 검증 (Dependency Injection)
@@ -378,35 +365,25 @@ def require_permission(resource: str, action: str):
     return permission_checker
 ```
 
-### 5.3 Redis 기반 비동기 웹훅 워커
+### 5.3 Celery 비동기 웹훅 태스크
 ```python
-# app/workers/webhook_worker.py
-import asyncio, json, httpx
-from redis.asyncio import Redis
+# app/worker/tasks.py
+import httpx
+from app.core.celery_app import celery_app
 
-async def process_webhook_queue(redis_client: Redis):
-    while True:
-        try:
-            result = await redis_client.brpop("webhook:queue", timeout=5)
-            if result:
-                _, payload_str = result
-                event = json.loads(payload_str)
-                teams_payload = format_teams_card(event)
-                
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(TEAMS_WEBHOOK_URL, json=teams_payload, timeout=10.0)
-                    response.raise_for_status()
-        except httpx.HTTPError as e:
-            await redis_client.lpush("webhook:dlq", payload_str) # 실패 시 Dead Letter Queue 이동
-        except Exception:
-            await asyncio.sleep(1)
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=5)
+def send_teams_webhook(self, asset_id: str, action: str, changes: dict):
+    try:
+        card_payload = build_adaptive_card(asset_id, action, changes)
+        response = httpx.post("[https://outlook.office.com/webhook/](https://outlook.office.com/webhook/)...", json=card_payload, timeout=10.0)
+        response.raise_for_status()
+    except Exception as exc:
+        raise self.retry(exc=exc)
 ```
 
 ---
 
 ## 6. 프론트엔드 아키텍처 (Next.js 15)
-
-데이터 정합성을 위해 텍스트 입력창을 최소화하고, 마스터 데이터를 연계한 캐스케이딩 드롭다운(Cascading Select: 회사 선택 -> 소속 부서 필터링 -> 담당자 선택)을 적용합니다.
 
 ### 6.1 폴더 구조 (App Router)
 
@@ -438,9 +415,9 @@ async def process_webhook_queue(redis_client: Redis):
 
 ---
 
-## 7. 인프라 배포 (Docker Integration)
+## 7. 컨테이너 배포 정의 (Docker Integration)
 
-개발 및 온프레미스 배포를 위한 Multi-Container 환경 설정입니다.
+로컬 개발 환경에서 소스코드를 수정하면 컨테이너 재빌드 없이 즉시 반영(Hot-Reload & Fast Refresh)되도록 볼륨 마운트가 구성된 개발 완성형 `docker-compose.yml`입니다.
 
 `docker-compose.yml`
 ```yaml
@@ -449,16 +426,24 @@ version: '3.8'
 services:
   db:
     image: postgres:16-alpine
-    container_name: xenon-postgres
+    container_name: xenon-db
     environment:
-      POSTGRES_USER: xenon_admin
-      POSTGRES_PASSWORD: xenon_password
-      POSTGRES_DB: xenon_db
+      POSTGRES_USER: ${POSTGRES_USER:-xenon_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xenon_password}
+      POSTGRES_DB: ${POSTGRES_DB:-xenon_db}
       TZ: Asia/Seoul
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - xenon_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xenon_admin} -d${POSTGRES_DB:-xenon_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -466,34 +451,112 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redisdata:/data
+      - redis_data:/data
+    networks:
+      - xenon_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  api:
-    build: 
+  backend:
+    build:
       context: ./backend
-    container_name: xenon-api
+      dockerfile: Dockerfile
+    container_name: xenon-backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    env_file:
+      - .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://xenon_admin:xenon_password@db:5432/xenon_db
-      - REDIS_URL=redis://redis:6379/0
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://xenon_admin:xenon_password@db:5432/xenon_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TZ: Asia/Seoul
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+    networks:
+      - xenon_network
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  web:
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: xenon-worker
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://xenon_admin:xenon_password@db:5432/xenon_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TZ: Asia/Seoul
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+    networks:
+      - xenon_network
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: xenon-beat
+    command: celery -A app.core.celery_app.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://xenon_admin:xenon_password@db:5432/xenon_db}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      TZ: Asia/Seoul
+    volumes:
+      - ./backend:/app
+    networks:
+      - xenon_network
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
     build:
       context: ./frontend
-    container_name: xenon-web
+      dockerfile: Dockerfile
+    container_name: xenon-frontend
+    command: npm run dev
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      BACKEND_INTERNAL_URL: http://backend:8000/api/v1
     ports:
       - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - xenon_network
     depends_on:
-      - api
+      - backend
+
+networks:
+  xenon_network:
+    driver: bridge
 
 volumes:
-  pgdata:
-  redisdata:
+  postgres_data:
+  redis_data:
 ```
