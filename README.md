@@ -426,7 +426,7 @@ version: '3.8'
 services:
   db:
     image: postgres:16-alpine
-    container_name: xenon-db
+    container_name: xenon-itam-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-xenon_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xenon_password}
@@ -435,11 +435,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - xenon_itam_pgdata:/var/lib/postgresql/data
     networks:
-      - xenon_network
+      - xenon_itam_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xenon_admin} -d${POSTGRES_DB:-xenon_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xenon_admin} -d ${POSTGRES_DB:-xenon_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -447,13 +447,13 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: xenon-redis
+    container_name: xenon-itam-redis
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - xenon_itam_redisdata:/data
     networks:
-      - xenon_network
+      - xenon_itam_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -464,7 +464,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: xenon-backend
+    container_name: xenon-itam-backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     env_file:
       - .env
@@ -479,7 +479,7 @@ services:
     volumes:
       - ./backend:/app
     networks:
-      - xenon_network
+      - xenon_itam_network
     depends_on:
       db:
         condition: service_healthy
@@ -490,7 +490,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: xenon-worker
+    container_name: xenon-itam-worker
     command: celery -A app.core.celery_app.celery_app worker --loglevel=info --concurrency=4
     env_file:
       - .env
@@ -503,7 +503,7 @@ services:
     volumes:
       - ./backend:/app
     networks:
-      - xenon_network
+      - xenon_itam_network
     depends_on:
       db:
         condition: service_healthy
@@ -514,7 +514,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: xenon-beat
+    container_name: xenon-itam-beat
     command: celery -A app.core.celery_app.celery_app beat --loglevel=info
     env_file:
       - .env
@@ -525,7 +525,7 @@ services:
     volumes:
       - ./backend:/app
     networks:
-      - xenon_network
+      - xenon_itam_network
     depends_on:
       db:
         condition: service_healthy
@@ -536,7 +536,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: xenon-frontend
+    container_name: xenon-itam-frontend
     command: npm run dev
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
@@ -553,10 +553,10 @@ services:
       - backend
 
 networks:
-  xenon_network:
+  xenon_itam_network:
     driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  xenon_itam_pgdata:
+  xenon_itam_redisdata:
 ```
